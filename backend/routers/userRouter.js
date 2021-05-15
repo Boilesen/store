@@ -1,77 +1,91 @@
 import express from "express";
 import expressAsyncHandler from "express-async-handler";
-import Order from "../models/orderModel.js";
-import { isAuth } from "../utils.js";
+import bcrypt from "bcryptjs";
+import data from "../data.js";
+import User from "../models/userModel.js";
+import { generateToken, isAuth } from "../utils.js";
 
-const orderRouter = express.Router();
+const userRouter = express.Router();
 
-orderRouter.get(
-  "/mine",
-  isAuth,
+userRouter.get(
+  "/seed",
   expressAsyncHandler(async (req, res) => {
-    const orders = await Order.find({ user: req.user._id });
-    res.send(orders);
+    // await User.remove({});
+    const createdUsers = await User.insertMany(data.users);
+    res.send({ createdUsers });
   })
 );
 
-orderRouter.post(
-  "/",
-  isAuth,
+userRouter.post(
+  "/signin",
   expressAsyncHandler(async (req, res) => {
-    if (req.body.orderItems.length === 0) {
-      res.status(400).send({ message: "Cart is empty" });
-    } else {
-      const order = new Order({
-        orderItems: req.body.orderItems,
-        shippingAddress: req.body.shippingAddress,
-        paymentMethod: req.body.paymentMethod,
-        itemsPrice: req.body.itemsPrice,
-        shippingPrice: req.body.shippingPrice,
-        taxPrice: req.body.taxPrice,
-        totalPrice: req.body.totalPrice,
-        user: req.user._id,
-      });
-      const createdOrder = await order.save();
-      res
-        .status(201)
-        .send({ message: "New Order Created", order: createdOrder });
+    const user = await User.findOne({ email: req.body.email });
+    if (user) {
+      if (bcrypt.compareSync(req.body.password, user.password)) {
+        res.send({
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          isAdmin: user.isAdmin,
+          token: generateToken(user),
+        });
+        return;
+      }
     }
+    res.status(401).send({ message: "Invalid email or password" });
   })
 );
 
-orderRouter.get(
+userRouter.post(
+  "/register",
+  expressAsyncHandler(async (req, res) => {
+    const user = new User({
+      name: req.body.name,
+      email: req.body.email,
+      password: bcrypt.hashSync(req.body.password, 8),
+    });
+    const createdUser = await user.save();
+    res.send({
+      _id: createdUser._id,
+      name: createdUser.name,
+      email: createdUser.email,
+      isAdmin: createdUser.isAdmin,
+      token: generateToken(createdUser),
+    });
+  })
+);
+
+userRouter.get(
   "/:id",
-  isAuth,
   expressAsyncHandler(async (req, res) => {
-    const order = await Order.findById(req.params.id);
-    if (order) {
-      res.send(order);
+    const user = await User.findById(req.params.id);
+    if (user) {
+      res.send(user);
     } else {
-      res.status(404).send({ message: "Order Not Found" });
+      res.status(404).send({ message: "User Not Found" });
     }
   })
 );
-
-orderRouter.put(
-  "/:id/pay",
+userRouter.put(
+  "/profile",
   isAuth,
   expressAsyncHandler(async (req, res) => {
-    const order = await Order.findById(req.params.id);
-    if (order) {
-      order.isPaid = true;
-      order.paidAt = Date.now();
-      order.paymentResult = {
-        id: req.body.id,
-        status: req.body.status,
-        update_time: req.body.update_time,
-        email_address: req.body.email_address,
-      };
-      const updatedOrder = await order.save();
-      res.send({ message: "Order Paid", order: updatedOrder });
-    } else {
-      res.status(404).send({ message: "Order Not Found" });
+    const user = await User.findById(req.user._id);
+    if (user) {
+      user.name = req.body.name || user.name;
+      user.email = req.body.email || user.email;
+      if (req.body.password) {
+        user.password = bcrypt.hashSync(req.body.password, 8);
+      }
+      const updatedUser = await user.save();
+      res.send({
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        isAdmin: updatedUser.isAdmin,
+        token: generateToken(updatedUser),
+      });
     }
   })
 );
-
-export default orderRouter;
+export default userRouter;
